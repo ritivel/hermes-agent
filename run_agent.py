@@ -6641,6 +6641,34 @@ class AIAgent:
                             response_invalid = True
                             error_details.append("response.content is not a list")
                         elif len(content_blocks) == 0:
+                            # Check if this is a post-tool-result empty response.
+                            # When the model returns text + tool_use in a single turn,
+                            # the follow-up after the tool result may be empty because
+                            # the model has nothing more to add. In that case, treat
+                            # the previous text as the final response.
+                            _prev_assistant_text = None
+                            _last_was_tool_result = (
+                                messages and isinstance(messages[-1], dict)
+                                and messages[-1].get("role") == "tool"
+                            )
+                            if _last_was_tool_result:
+                                for _prev_msg in reversed(messages):
+                                    if isinstance(_prev_msg, dict) and _prev_msg.get("role") == "assistant":
+                                        _prev_assistant_text = (_prev_msg.get("content") or "").strip()
+                                        break
+                            if _prev_assistant_text:
+                                self._vprint(
+                                    f"{self.log_prefix}ℹ️  Empty response after tool result — "
+                                    f"using previous assistant text as final response.",
+                                    force=True,
+                                )
+                                self._persist_session(messages, conversation_history)
+                                return {
+                                    "final_response": _prev_assistant_text,
+                                    "messages": messages,
+                                    "api_calls": api_call_count,
+                                    "completed": True,
+                                }
                             response_invalid = True
                             error_details.append("response.content is empty")
                     else:
@@ -6713,6 +6741,7 @@ class AIAgent:
                             logging.error(f"{self.log_prefix}Invalid API response after {max_retries} retries.")
                             self._persist_session(messages, conversation_history)
                             return {
+                                "final_response": None,
                                 "messages": messages,
                                 "completed": False,
                                 "api_calls": api_call_count,
@@ -7162,6 +7191,7 @@ class AIAgent:
                             logging.error(f"{self.log_prefix}413 compression failed after {max_compression_attempts} attempts.")
                             self._persist_session(messages, conversation_history)
                             return {
+                                "final_response": None,
                                 "messages": messages,
                                 "completed": False,
                                 "api_calls": api_call_count,
@@ -7187,6 +7217,7 @@ class AIAgent:
                             logging.error(f"{self.log_prefix}413 payload too large. Cannot compress further.")
                             self._persist_session(messages, conversation_history)
                             return {
+                                "final_response": None,
                                 "messages": messages,
                                 "completed": False,
                                 "api_calls": api_call_count,
@@ -7264,6 +7295,7 @@ class AIAgent:
                             logging.error(f"{self.log_prefix}Context compression failed after {max_compression_attempts} attempts.")
                             self._persist_session(messages, conversation_history)
                             return {
+                                "final_response": None,
                                 "messages": messages,
                                 "completed": False,
                                 "api_calls": api_call_count,
@@ -7291,6 +7323,7 @@ class AIAgent:
                             logging.error(f"{self.log_prefix}Context length exceeded: {approx_tokens:,} tokens. Cannot compress further.")
                             self._persist_session(messages, conversation_history)
                             return {
+                                "final_response": None,
                                 "messages": messages,
                                 "completed": False,
                                 "api_calls": api_call_count,
